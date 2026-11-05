@@ -1,0 +1,2 @@
+# manews
+news script
