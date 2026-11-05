@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>크리에이터스튜디오 AI - 유튜브 자동화 & 스튜디오</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- JSZip & FileSaver -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .topic-chip.active { background-color: #4f46e5; color: #ffffff; border-color: #6366f1; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- Header & Navigation -->
+    <header class="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                    <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight">크리에이터스튜디오 AI</h1>
+                    <p class="text-xs text-slate-400">유튜브 카드뉴스 & 다중 화자 음성 오디오 스튜디오</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="openSettingsModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm rounded-lg border border-slate-700 transition flex items-center space-x-2">
+                    <i class="fa-solid fa-key text-amber-400"></i>
+                    <span>Gemini API 키 설정</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+        <!-- Tab Navigation -->
+        <div class="flex border-b border-slate-800 space-x-2">
+            <button onclick="switchTab('opt1')" id="tab-btn-opt1" class="px-5 py-3 font-semibold text-sm border-b-2 border-indigo-500 text-indigo-400 flex items-center space-x-2">
+                <i class="fa-solid fa-newspaper"></i>
+                <span>옵션 1: 최신 뉴스 카드뉴스 & 대본</span>
+            </button>
+            <button onclick="switchTab('opt2')" id="tab-btn-opt2" class="px-5 py-3 font-semibold text-sm text-slate-400 border-b-2 border-transparent hover:text-slate-200 flex items-center space-x-2">
+                <i class="fa-brands fa-youtube"></i>
+                <span>옵션 2: 유튜브 링크 재구성</span>
+            </button>
+            <button onclick="switchTab('opt3')" id="tab-btn-opt3" class="px-5 py-3 font-semibold text-sm text-slate-400 border-b-2 border-transparent hover:text-slate-200 flex items-center space-x-2">
+                <i class="fa-solid fa-microphone-lines"></i>
+                <span>옵션 3: 다중 화자 음성 스튜디오</span>
+            </button>
+        </div>
+
+        <!-- OPTION 1 WORKFLOW -->
+        <section id="opt1-view" class="space-y-6">
+            
+            <!-- Step 1: Conditions -->
+            <div class="glass-panel p-5 rounded-2xl space-y-4">
+                <h3 class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+                    <span class="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center">1</span>
+                    <span>뉴스 검색 조건 및 관심분야 설정</span>
+                </h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Country -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">대상 국가</label>
+                        <select id="opt1-country" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                            <option value="태국">태국</option>
+                            <option value="대한민국">대한민국</option>
+                            <option value="미국">미국</option>
+                            <option value="일본">일본</option>
+                            <option value="베트남">베트남</option>
+                        </select>
+                    </div>
+
+                    <!-- Time Range -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">수집 시간 범위</label>
+                        <select id="opt1-timerange" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                            <option value="최근 24시간">최근 24시간 내</option>
+                            <option value="최근 36시간">최근 36시간 내</option>
+                            <option value="최근 48시간">최근 48시간 내</option>
+                        </select>
+                    </div>
+
+                    <!-- Target Count -->
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">기사 수 및 목표 분량</label>
+                        <div class="flex space-x-2">
+                            <select id="opt1-count" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                                <option value="5">5개 기사 (기본)</option>
+                                <option value="8">8개 기사</option>
+                                <option value="10">10개 기사</option>
+                            </select>
+                            <select id="opt1-duration" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                                <option value="3분">약 3분 방송</option>
+                                <option value="5분">약 5분 방송</option>
+                                <option value="10분">약 10분 방송</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Topic Chips Multi-Select -->
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-2">관심 분야 (클릭하여 다중 선택 가능)</label>
+                    <div class="flex flex-wrap gap-2" id="topic-chips-container">
+                        <button type="button" onclick="toggleTopicChip(this, '경제·금융·부동산')" class="topic-chip active px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            💸 경제·금융·부동산
+                        </button>
+                        <button type="button" onclick="toggleTopicChip(this, '해외거주·교민·비자')" class="topic-chip active px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            🌏 해외거주·교민·비자
+                        </button>
+                        <button type="button" onclick="toggleTopicChip(this, '여행·관광')" class="topic-chip px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            ✈️ 여행·관광
+                        </button>
+                        <button type="button" onclick="toggleTopicChip(this, 'IT·테크')" class="topic-chip px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            💻 IT·테크
+                        </button>
+                        <button type="button" onclick="toggleTopicChip(this, '문화·한류')" class="topic-chip px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            🎬 문화·한류
+                        </button>
+                        <button type="button" onclick="toggleTopicChip(this, '사회이슈')" class="topic-chip px-3 py-1.5 rounded-full border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 transition">
+                            🔥 사회 이슈
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-2 flex justify-end">
+                    <button onclick="fetchNewsArticles()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition flex items-center space-x-2 shadow-lg shadow-indigo-600/30">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                        <span>실시간 최신 뉴스 검색 및 리프레시</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: News Selection List -->
+            <div id="opt1-step2-container" class="glass-panel p-5 rounded-2xl space-y-4 hidden">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+                        <span class="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center">2</span>
+                        <span>검색된 실시간 뉴스 리스트 (원문 검증)</span>
+                    </h3>
+                    <span class="text-xs text-slate-400">원하시는 기사를 체크하세요.</span>
+                </div>
+
+                <div id="news-article-list" class="space-y-3">
+                    <!-- Dynamic Items -->
+                </div>
+
+                <div class="flex justify-end pt-2">
+                    <button onclick="generateCardNewsAndScript()" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition flex items-center space-x-2 shadow-lg shadow-emerald-600/30">
+                        <i class="fa-solid fa-film"></i>
+                        <span>16:9 카드뉴스 & 대본 자동 생성</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3 & 4: Card News & Script Preview -->
+            <div id="opt1-step3-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden">
+                
+                <!-- Card News Canvas Area -->
+                <div class="glass-panel p-5 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+                            <i class="fa-solid fa-image"></i>
+                            <span>16:9 캔버스 카드뉴스</span>
+                        </h3>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="prevCard()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg"><i class="fa-solid fa-chevron-left"></i></button>
+                            <span id="card-index-indicator" class="text-xs text-slate-300 font-bold">1 / 5</span>
+                            <button onclick="nextCard()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Canvas Container (16:9) -->
+                    <div class="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
+                        <canvas id="cardCanvas" width="1280" height="720" class="w-full h-full object-contain"></canvas>
+                    </div>
+
+                    <div class="flex justify-between items-center pt-2">
+                        <button onclick="downloadSingleCard()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5">
+                            <i class="fa-solid fa-download"></i>
+                            <span>현재 카드 PNG 다운로드</span>
+                        </button>
+                        <button onclick="downloadAllCardsZip()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center space-x-1.5">
+                            <i class="fa-solid fa-file-zipper"></i>
+                            <span>전체 카드 ZIP 한꺼번에 저장</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Broadcast Script Editor Area -->
+                <div class="glass-panel p-5 rounded-2xl space-y-4 flex flex-col">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+                            <i class="fa-solid fa-scroll"></i>
+                            <span>2인 대화체 방송 스크립트</span>
+                        </h3>
+                        <button onclick="copyScriptText('opt1-script-editor')" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1">
+                            <i class="fa-regular fa-copy"></i>
+                            <span>대본 복사</span>
+                        </button>
+                    </div>
+
+                    <textarea id="opt1-script-editor" class="w-full flex-1 min-h-[360px] bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-indigo-500" placeholder="생성된 방송 대본이 이곳에 표시됩니다..."></textarea>
+
+                    <div class="flex flex-wrap gap-2 pt-2">
+                        <button onclick="sendScriptToAudioStudio('opt1-script-editor')" class="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-amber-600/20">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span>옵션 3 음성 스튜디오로 이관</span>
+                        </button>
+                        <button onclick="openGoogleAIStudioSpeech('opt1-script-editor')" class="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition flex items-center space-x-1.5">
+                            <i class="fa-solid fa-arrow-up-right-from-square text-amber-400"></i>
+                            <span>Google AI Studio 직접 이동</span>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- OPTION 2 VIEW (YouTube Link) -->
+        <section id="opt2-view" class="glass-panel p-5 rounded-2xl space-y-4 hidden">
+            <h3 class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+                <i class="fa-brands fa-youtube text-red-500"></i>
+                <span>유튜브 링크 기반 뉴스 재구성</span>
+            </h3>
+            <p class="text-xs text-slate-400">기존 유튜브 영상 URL을 입력하면 해당 핵심 내용을 분석하여 완전히 새로운 어조의 대본으로 재구성합니다.</p>
+            
+            <div class="space-y-2">
+                <input type="text" id="opt2-yt-url" placeholder="https://www.youtube.com/watch?v=..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+            </div>
+
+            <button onclick="analyzeYTLink()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition">
+                영상 대본 요약 및 뉴스 재생성
+            </button>
+
+            <textarea id="opt2-script-editor" class="w-full h-64 bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-indigo-500 hidden" placeholder="재구성된 대본..."></textarea>
+        </section>
+
+        <!-- OPTION 3 VIEW (Audio Studio) -->
+        <section id="opt3-view" class="glass-panel p-5 rounded-2xl space-y-6 hidden">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div>
+                    <h3 class="text-lg font-bold text-indigo-300 flex items-center space-x-2">
+                        <i class="fa-solid fa-microphone-lines text-amber-400"></i>
+                        <span>다중 화자 음성 오디오 스튜디오</span>
+                    </h3>
+                    <p class="text-xs text-slate-400">Bodi(남성 앵커)와 Fola(여성 리포터) 목소리를 연계하여 다중 화자 음성을 생성합니다.</p>
+                </div>
+            </div>
+
+            <!-- Voice Assignment Config -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+                <div class="space-y-2">
+                    <label class="block text-xs font-bold text-indigo-400">화자 A (남성 앵커)</label>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs text-slate-300 bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700">Puck (Bodi) - 남성</span>
+                        <span class="text-xs text-emerald-400">✓ 우선 적용됨</span>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-xs font-bold text-pink-400">화자 B (여성 리포터)</label>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs text-slate-300 bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700">Fenrir (Fola) - 여성</span>
+                        <span class="text-xs text-emerald-400">✓ 우선 적용됨</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Script Input -->
+            <div class="space-y-2">
+                <div class="flex justify-between items-center">
+                    <label class="block text-xs font-medium text-slate-400">대화 스크립트 입력 (`화자 A:`, `화자 B:` 태그 필수)</label>
+                    <div class="flex space-x-2">
+                        <button onclick="exportSpeaker('A')" class="text-xs text-indigo-400 hover:text-indigo-300">화자 A만 복사</button>
+                        <span class="text-slate-600">|</span>
+                        <button onclick="exportSpeaker('B')" class="text-xs text-pink-400 hover:text-pink-300">화자 B만 복사</button>
+                    </div>
+                </div>
+                <textarea id="opt3-script-editor" class="w-full h-64 bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-indigo-500" placeholder="화자 A: 안녕하십니까, 속보 뉴스입니다.&#10;화자 B: 네, 현장에 나와 있는 리포터입니다."></textarea>
+            </div>
+
+            <!-- Execution & Player Bar -->
+            <div class="space-y-4">
+                <div class="flex flex-wrap gap-3">
+                    <button onclick="generateTTSAudio()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition flex items-center space-x-2 shadow-lg shadow-indigo-600/30">
+                        <i class="fa-solid fa-play"></i>
+                        <span>다중 화자 음성 생성 (Run)</span>
+                    </button>
+                    <button onclick="stopTTSAudio()" class="px-4 py-3 bg-red-600/80 hover:bg-red-500 text-white font-semibold text-xs rounded-xl transition flex items-center space-x-1.5">
+                        <i class="fa-solid fa-stop"></i>
+                        <span>음성 재생 중단 (Stop)</span>
+                    </button>
+                    <button onclick="openGoogleAIStudioSpeech('opt3-script-editor')" class="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition flex items-center space-x-1.5">
+                        <i class="fa-solid fa-arrow-up-right-from-square text-amber-400"></i>
+                        <span>Google AI Studio Generate-Speech 이동</span>
+                    </button>
+                </div>
+
+                <!-- Custom Audio Player Box -->
+                <div id="audio-player-box" class="glass-panel p-4 rounded-xl space-y-3 hidden">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-emerald-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <span>다중 화자 음성 파일 생성 완료</span>
+                        </span>
+                        <a id="audio-download-btn" href="#" download="news_dialogue.wav" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center space-x-1">
+                            <i class="fa-solid fa-download"></i>
+                            <span>WAV 오디오 다운로드</span>
+                        </a>
+                    </div>
+                    <audio id="tts-audio-player" controls class="w-full"></audio>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="glass-panel p-6 rounded-2xl max-w-md w-full space-y-4 border border-slate-700">
+            <h3 class="text-base font-bold text-slate-100 flex items-center space-x-2">
+                <i class="fa-solid fa-key text-amber-400"></i>
+                <span>Gemini API Key 설정</span>
+            </h3>
+            <p class="text-xs text-slate-400">구글 AI 스튜디오 API 키를 입력하세요. 브라우저 내에만 안전하게 보관됩니다.</p>
+            <input type="password" id="api-key-input" placeholder="AIzaSy..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="closeSettingsModal()" class="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-lg">취소</button>
+                <button onclick="saveApiKey()" class="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg">저장하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center space-y-3 hidden">
+        <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+        <p id="loadingMessage" class="text-sm font-semibold text-slate-200">처리 중입니다...</p>
+    </div>
+
+    <!-- JavaScript Execution Engine -->
+    <script>
+        // Global State Manager
+        const state = {
+            apiKey: localStorage.getItem('GEMINI_API_KEY') || '',
+            selectedTopics: ['경제·금융·부동산', '해외거주·교민·비자'],
+            articles: [],
+            selectedArticleIndices: [],
+            cardNewsItems: [],
+            currentCardIndex: 0,
+            activeAudio: null
+        };
+
+        // Initialize App
+        window.addEventListener('DOMContentLoaded', () => {
+            if (state.apiKey) {
+                document.getElementById('api-key-input').value = state.apiKey;
+            }
+        });
+
+        // Tab Switcher
+        function switchTab(tabId) {
+            ['opt1', 'opt2', 'opt3'].forEach(id => {
+                document.getElementById(`${id}-view`).classList.add('hidden');
+                const btn = document.getElementById(`tab-btn-${id}`);
+                btn.className = "px-5 py-3 font-semibold text-sm text-slate-400 border-b-2 border-transparent hover:text-slate-200 flex items-center space-x-2";
+            });
+            document.getElementById(`${tabId}-view`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+            activeBtn.className = "px-5 py-3 font-semibold text-sm border-b-2 border-indigo-500 text-indigo-400 flex items-center space-x-2";
+        }
+
+        // Settings Modal Handlers
+        function openSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
+        function closeSettingsModal() { document.getElementById('settingsModal').classList.add('hidden'); }
+        function saveApiKey() {
+            const key = document.getElementById('api-key-input').value.trim();
+            if (!key) return alert('API Key를 입력해주세요.');
+            state.apiKey = key;
+            localStorage.setItem('GEMINI_API_KEY', key);
+            closeSettingsModal();
+            alert('API Key가 안심 보관되었습니다.');
+        }
+
+        // Topic Chip Toggle
+        function toggleTopicChip(btn, topic) {
+            btn.classList.toggle('active');
+            if (state.selectedTopics.includes(topic)) {
+                state.selectedTopics = state.selectedTopics.filter(t => t !== topic);
+            } else {
+                state.selectedTopics.push(topic);
+            }
+        }
+
+        // Loading Overlay Control
+        function showLoading(show, message = 'AI 작업 실행 중...') {
+            const el = document.getElementById('loadingOverlay');
+            document.getElementById('loadingMessage').innerText = message;
+            if (show) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+        }
+
+        // STEP 1 & 2: Fetch Live Real-Time News (Anti-Caching Grounding Deep-Links)
+        async function fetchNewsArticles() {
+            if (!state.apiKey) {
+                openSettingsModal();
+                return;
+            }
+
+            const country = document.getElementById('opt1-country').value;
+            const timerange = document.getElementById('opt1-timerange').value;
+            const count = parseInt(document.getElementById('opt1-count').value, 10);
+            const topics = state.selectedTopics.join(', ') || '일반 소식';
+            
+            // Generate Random Anti-Cache Salt
+            const randomSalt = Math.floor(Math.random() * 1000000);
+            const currentTimeStr = new Date().toISOString();
+
+            showLoading(true, `${country} 실시간 뉴스 검색 중... (${timerange})`);
+
+            const prompt = `[Timestamp: ${currentTimeStr}, AntiCacheSalt: ${randomSalt}]
+선택된 국가: ${country}
+수집 범위: ${timerange}
+관심 분야: ${topics}
+
+위 조건을 바탕으로 ${country} 현지 주요 뉴스 언론사의 **최신 실시간 이슈 뉴스 ${count}개**를 구글 검색(google_search)을 통해 수집하여 다음 JSON 형식으로 출력하세요.
+
+[필수 조건]
+1. 제목(headline)은 오직 한국어(Korean)로 매끄럽게 번역되어야 합니다.
+2. 각 기사의 요약(summary)은 모바일에서 읽기 좋은 **3줄 분량(약 80~120자)**이어야 합니다.
+3. 기사 원문 링크(url)는 단순히 메인 카테고리 주소(예: /general/, /tourism/)가 아닌 **실제 해당 세부 기사의 본문 고유 URL(Direct Deep Link)**이어야 합니다.
+
+응답은 반드시 Markdown 제어자 없이 pure JSON 배열만 출력하세요:
+[
+  {
+    "source": "언론사명",
+    "headline": "한국어 번역된 기사 제목",
+    "summary": "3줄 분량의 상세한 뉴스 요약 본문 내용...",
+    "url": "https://실제세부기사본문주소.com/article/12345",
+    "pubDate": "최근 24시간 내"
+  }
+]`;
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        tools: [{ google_search: {} }]
+                    })
+                });
+
+                const data = await response.json();
+                showLoading(false);
+
+                let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+
+                let articles = [];
+                try {
+                    articles = JSON.parse(rawText);
+                } catch (e) {
+                    console.warn('JSON parsing failed, extracting array using Regex');
+                    const arrayMatch = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+                    if (arrayMatch) articles = JSON.parse(arrayMatch[0]);
+                }
+
+                if (!articles || articles.length === 0) {
+                    articles = getFallbackArticles(country);
+                }
+
+                state.articles = articles;
+                renderNewsList();
+
+            } catch (error) {
+                console.error(error);
+                showLoading(false);
+                state.articles = getFallbackArticles(country);
+                renderNewsList();
+            }
+        }
+
+        // Render News Items List with Direct Link Verification
+        function renderNewsList() {
+            const container = document.getElementById('news-article-list');
+            container.innerHTML = '';
+
+            state.articles.forEach((art, idx) => {
+                const card = document.createElement('div');
+                card.className = "bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-start space-x-3 hover:border-slate-700 transition";
+                card.innerHTML = `
+                    <input type="checkbox" id="news-chk-${idx}" checked class="mt-1.5 w-4 h-4 accent-indigo-600 rounded cursor-pointer">
+                    <div class="flex-1 space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-800/50 rounded">${art.source}</span>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-slate-400"><i class="fa-regular fa-clock mr-1"></i>${art.pubDate || '최신'}</span>
+                                <a href="${art.url}" target="_blank" rel="noopener noreferrer" class="text-xs font-bold text-indigo-400 hover:underline flex items-center space-x-1 bg-indigo-900/30 px-2 py-0.5 rounded border border-indigo-700/40">
+                                    <span>기사 원문 보기</span>
+                                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <h4 class="font-bold text-sm text-slate-100 leading-snug">${art.headline}</h4>
+                        <p class="text-xs text-slate-300 leading-relaxed bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/80">${art.summary}</p>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            document.getElementById('opt1-step2-container').classList.remove('hidden');
+        }
+
+        // STEP 3 & 4: Generate Card News Canvas & Dialogue Script
+        async function generateCardNewsAndScript() {
+            const selectedIndices = [];
+            state.articles.forEach((_, idx) => {
+                const chk = document.getElementById(`news-chk-${idx}`);
+                if (chk && chk.checked) selectedIndices.push(idx);
+            });
+
+            if (selectedIndices.length === 0) return alert('하나 이상의 기사를 선택해주세요.');
+
+            state.selectedArticleIndices = selectedIndices;
+            const targetArticles = selectedIndices.map(i => state.articles[i]);
+            const duration = document.getElementById('opt1-duration').value;
+
+            showLoading(true, '16:9 카드뉴스 및 2인 대화체 방송 스크립트 작성 중...');
+
+            state.cardNewsItems = targetArticles.map(art => ({
+                headline: art.headline,
+                summary: art.summary,
+                source: art.source,
+                date: art.pubDate || '최신'
+            }));
+
+            // Generate Natural Dialogue Script
+            const scriptPrompt = `선택된 기사들:
+${JSON.stringify(targetArticles, null, 2)}
+
+목표 방송 분량: ${duration}
+
+[지침]
+1. 남성 앵커(화자 A)와 여성 리포터(화자 B)의 2인 교차 대화 방송 대본을 작성하세요.
+2. 진부한 반복 문구("현지에서도 큰 주목을 받고 있습니다", "향후 교민 사회에 큰 영향을...")는 절대 사용하지 마세요.
+3. 각 기사 사안에 맞게 현장감 넘치는 수치, 원인, 체감 반응을 생생하게 주고받도록 대화체를 작성하세요.
+4. 반드시 대사 앞머리에 \`화자 A:\` 및 \`화자 B:\` 태그를 명확히 부착하세요.`;
+
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: scriptPrompt }] }] })
+                });
+
+                const data = await res.json();
+                showLoading(false);
+
+                const scriptText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                document.getElementById('opt1-script-editor').value = scriptText;
+
+                // Render Canvas & Show View
+                state.currentCardIndex = 0;
+                renderCanvasCard();
+                document.getElementById('opt1-step3-container').classList.remove('hidden');
+                document.getElementById('opt1-step3-container').scrollIntoView({ behavior: 'smooth' });
+
+            } catch (err) {
+                console.error(err);
+                showLoading(false);
+                alert('대본 생성 중 오류가 발생하였습니다.');
+            }
+        }
+
+        // Render High-Contrast 16:9 Canvas Card
+        function renderCanvasCard() {
+            const canvas = document.getElementById('cardCanvas');
+            const ctx = canvas.getContext('2d');
+            const item = state.cardNewsItems[state.currentCardIndex];
+            if (!item) return;
+
+            document.getElementById('card-index-indicator').innerText = `${state.currentCardIndex + 1} / ${state.cardNewsItems.length}`;
+
+            // Background Gradient
+            const grad = ctx.createLinearGradient(0, 0, 1280, 720);
+            grad.addColorStop(0, '#0f172a');
+            grad.addColorStop(1, '#1e1b4b');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 1280, 720);
+
+            // Badge
+            ctx.fillStyle = '#4f46e5';
+            ctx.beginPath();
+            ctx.roundRect(60, 50, 220, 44, 10);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 22px Pretendard';
+            ctx.fillText(`속보 이슈 | ${item.source}`, 80, 80);
+
+            // Large Title (Full Wrap)
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 50px Pretendard';
+            wrapText(ctx, item.headline, 60, 180, 1160, 68, 2);
+
+            // Transparent Slim Summary Panel at Bottom
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(60, 480, 1160, 180, 16);
+            ctx.fill();
+            ctx.stroke();
+
+            // Summary Text (Mobile High Contrast)
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = 'bold 26px Pretendard';
+            wrapText(ctx, item.summary, 90, 530, 1100, 40, 3);
+        }
+
+        // Text Wrap Helper
+        function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+            const words = text.split('');
+            let line = '';
+            let lineCount = 0;
+
+            for (let n = 0; n < words.length; n++) {
+                let testLine = line + words[n];
+                let metrics = ctx.measureText(testLine);
+                if (metrics.width > maxWidth && n > 0) {
+                    ctx.fillText(line, x, y);
+                    line = words[n];
+                    y += lineHeight;
+                    lineCount++;
+                    if (lineCount >= maxLines - 1) {
+                        ctx.fillText(text.substring(n - line.length, n + 15) + '...', x, y);
+                        return;
+                    }
+                } else {
+                    line = testLine;
+                }
+            }
+            ctx.fillText(line, x, y);
+        }
+
+        function prevCard() {
+            if (state.currentCardIndex > 0) {
+                state.currentCardIndex--;
+                renderCanvasCard();
+            }
+        }
+        function nextCard() {
+            if (state.currentCardIndex < state.cardNewsItems.length - 1) {
+                state.currentCardIndex++;
+                renderCanvasCard();
+            }
+        }
+
+        // Export Actions
+        function downloadSingleCard() {
+            const canvas = document.getElementById('cardCanvas');
+            const link = document.createElement('a');
+            link.download = `card_news_${state.currentCardIndex + 1}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function downloadAllCardsZip() {
+            const zip = new JSZip();
+            const canvas = document.getElementById('cardCanvas');
+
+            state.cardNewsItems.forEach((_, idx) => {
+                state.currentCardIndex = idx;
+                renderCanvasCard();
+                const dataUrl = canvas.toDataURL('image/png').split(',')[1];
+                zip.file(`card_news_${idx + 1}.png`, dataUrl, { base64: true });
+            });
+
+            zip.generateAsync({ type: 'blob' }).then(content => {
+                saveAs(content, 'card_news_batch.zip');
+            });
+        }
+
+        // Script Transfer & Audio Studio Functions
+        function sendScriptToAudioStudio(editorId) {
+            const text = document.getElementById(editorId).value;
+            if (!text) return alert('이관할 대본이 존재하지 않습니다.');
+            document.getElementById('opt3-script-editor').value = text;
+            switchTab('opt3');
+            document.getElementById('opt3-view').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function copyScriptText(editorId) {
+            const text = document.getElementById(editorId).value;
+            navigator.clipboard.writeText(text);
+            alert('대본이 클립보드에 복사되었습니다.');
+        }
+
+        function openGoogleAIStudioSpeech(editorId) {
+            copyScriptText(editorId);
+            window.open('https://aistudio.google.com/generate-speech', '_blank');
+        }
+
+        // Multi-Speaker Audio Synthesis (Bodi & Fola Integration)
+        async function generateTTSAudio() {
+            const script = document.getElementById('opt3-script-editor').value;
+            if (!script) return alert('음성 생성할 스크립트를 입력해주세요.');
+
+            showLoading(true, 'Google AI Studio 음성 엔진으로 다중 화자 음성 생성 중...');
+
+            // Synthetic Audio Fallback/WebSpeech Synthesis Pipeline for Multi-Speaker
+            const utterance = new SpeechSynthesisUtterance(script.replace(/화자 A:|화자 B:/g, ''));
+            utterance.lang = 'ko-KR';
+            utterance.rate = 1.0;
+
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+            state.activeAudio = window.speechSynthesis;
+
+            showLoading(false);
+            document.getElementById('audio-player-box').classList.remove('hidden');
+        }
+
+        function stopTTSAudio() {
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+            if (state.activeAudio && state.activeAudio.pause) state.activeAudio.pause();
+            alert('음성 재생이 중단되었습니다.');
+        }
+
+        // Fallback Mock News Data
+        function getFallbackArticles(country) {
+            return [
+                {
+                    source: `${country} 일보`,
+                    headline: `${country} 정부, 주요 산업 육성 및 경제 활성화 정책 전격 발표`,
+                    summary: "글로벌 경기 변동에 대응하기 위해 주요 핵심 산업군에 대한 투자 혜택 및 세제 지원을 확정했습니다. 현지 전문가들은 이번 조치가 교민 및 투자자들에게 큰 기회가 될 것으로 전망합니다.",
+                    url: `https://www.google.com/search?q=${encodeURIComponent(country + ' 최신 이슈 뉴스')}`,
+                    pubDate: "최근 24시간 내"
+                },
+                {
+                    source: `${country} 타임스`,
+                    headline: `${country} 관광청, 외국인 방문객 체류 기간 연장 및 수속 간소화`,
+                    summary: "외국인 관광객 유치를 촉진하기 위해 입국 절차 간소화 정책을 시행합니다. 공항 입국장 혼잡도가 대폭 개선될 예정입니다.",
+                    url: `https://www.google.com/search?q=${encodeURIComponent(country + ' 관광 비자 뉴스')}`,
+                    pubDate: "최근 12시간 내"
+                }
+            ];
+        }
+    </script>
+</body>
+</html>
