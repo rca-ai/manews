@@ -368,24 +368,66 @@
             else el.classList.add('hidden');
         }
 
-        // Check if URL is a generic section/category URL rather than a direct article URL
+        // Strict article URL validation: only use direct article links returned by Google grounding.
         function isCategoryUrl(url) {
             if (!url) return true;
-            const cleanUrl = url.toLowerCase().split('?')[0].split('#')[0].replace(/\/+$/, '');
-            const categoryPatterns = [
-                /\/thailand\/general$/,
-                /\/thailand$/,
-                /\/news$/,
-                /\/business$/,
-                /\/opinion$/,
-                /\/life$/,
-                /\/world$/,
-                /\/regional$/
-            ];
-            return categoryPatterns.some(pattern => pattern.test(cleanUrl));
+            try {
+                const parsed = new URL(url);
+                if (!['http:', 'https:'].includes(parsed.protocol)) return true;
+                const path = parsed.pathname.toLowerCase().replace(/\\/+$/, '');
+                return !path || [
+                    /^\\/thailand\\/general$/,
+                    /^\\/thailand$/,
+                    /^\\/news$/,
+                    /^\\/business$/,
+                    /^\\/opinion$/,
+                    /^\\/life$/,
+                    /^\\/world$/,
+                    /^\\/regional$/,
+                    /^\\/category(?:\\/|$)/,
+                    /^\\/topics?(?:\\/|$)$/
+                ].some(pattern => pattern.test(path));
+            } catch (_) {
+                return true;
+            }
         }
 
-        // Fetch Articles with Strict Deep-Link Extraction & Exact Grounding Filtering
+        function normalizeHeadline(value) {
+            return String(value || '')
+                .normalize('NFKC')
+                .toLocaleLowerCase()
+                .replace(/[「」『』【】\\[\\]（）()“”"'‘’]/g, '')
+                .replace(/[^\\p{L}\\p{N}]+/gu, ' ')
+                .trim()
+                .replace(/\\s+/g, ' ');
+        }
+
+        function getGroundingArticles(groundingChunks) {
+            const seenUrls = new Set();
+            const results = [];
+            for (const chunk of (groundingChunks || [])) {
+                const web = chunk && chunk.web;
+                const uri = web && web.uri;
+                const title = web && web.title;
+                if (!uri || !title || isCategoryUrl(uri)) continue;
+                let parsed;
+                try {
+                    parsed = new URL(uri);
+                    parsed.hash = '';
+                } catch (_) { continue; }
+                const normalizedUrl = parsed.href;
+                if (seenUrls.has(normalizedUrl)) continue;
+                seenUrls.add(normalizedUrl);
+                results.push({
+                    url: normalizedUrl,
+                    groundingTitle: String(title).trim(),
+                    source: parsed.hostname.replace(/^www\\./, '')
+                });
+            }
+            return results;
+        }
+
+        // Bind article titles to their exact grounded URLs; never assign links by array position.
         async function fetchNewsArticles() {
             if (!state.apiKey) {
                 openSettingsModal();
@@ -396,96 +438,123 @@
             const timerange = document.getElementById('opt1-timerange').value;
             const count = parseInt(document.getElementById('opt1-count').value, 10);
             const topics = state.selectedTopics.join(', ') || '종합 소식';
-            const randomSalt = Math.floor(Math.random() * 1000000);
             const now = new Date();
             const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-            showLoading(true, `${country} 실시간 최신 뉴스 ${count}개 수집 및 원문 매핑 중...`);
+            showLoading(true, `${country} 실제 기사 검색 및 제목·원문 링크 대조 중...`);
+            state.articles = [];
+            document.getElementById('news-article-list').innerHTML = '';
+            document.getElementById('opt1-step2-container').classList.add('hidden');
 
-            const prompt = `[현재 시각: ${dateStr}, AntiCache: ${randomSalt}]
-선택된 국가: ${country}
-수집 시간 범위: ${timerange}
+            const prompt = `현재 기준 시각: ${dateStr}
+국가: ${country}
+검색 기간: ${timerange}
 관심 분야: ${topics}
 
-Google Search(google_search) 도구를 이용해 ${country}의 주요 현지 일간지(예: 태국의 경우 Bangkok Post, The Nation Thailand 등)에서 보도된 **최신 이슈 뉴스 ${count}개**를 조사하세요.
-
-[필수 작성 지침]
-1. source: 해당 기사를 보도한 실제 해외 언론사의 정확한 브랜드명만 입력 (예: Bangkok Post, The Nation Thailand, VnExpress, Tuoi Tre News, 조선일보 등). "메이저 언론사" 같은 임의 명칭 금지.
-2. headline: 자연스러운 한국어로 번역한 기사 제목.
-3. summary: 단순 개조식이 아닌, 사건 배경, 구체적 수치, 관계자 소식 및 현지 반응을 종합한 **약 300~400자(6~8줄 내외)의 풍부한 기사 본문형 상세 단락 요약문**.
-4. pubDate: 실시간 보도 일시 (예: ${dateStr}).
-
-응답은 반드시 Markdown 제어표시 없이 pure JSON 배열로만 작성하세요:
-[
-  {
-    "source": "Bangkok Post",
-    "headline": "태국 정부, 무비자 연장 및 투자 유치 전격 승인",
-    "summary": "태국 정부가 경제 활성화와 외국인 방문객 편의 증진을 위한 신규 정책을 공식 발표했습니다. 이번 조치는 주요 국가 체류 비자 및 관광 무비자 기간을 대폭 연장함과 동시에, 주요 거점 신도시 및 공항을 연결하는 교통 인프라 혁신 사업을 골자로 하고 있습니다. 현지 상공회의소 및 유통 업계 관계자들은 이번 승인으로 인해 연간 25% 이상의 해외 투자가 유입되고 교민 상권 확장에 획기적인 전환점이 될 것으로 기대를 모으고 있습니다.",
-    "pubDate": "${dateStr}"
-  }
-]`;
+Google Search 도구를 이용해 실제 보도된 개별 기사를 검색하세요. 최근 기사 ${count}개를 목표로 하되, 실제로 확인되는 기사만 반환하세요.
+각 항목은 source(실제 언론사명), headline(한국어 제목), originalTitle(원문 제목), summary(해당 기사만의 상세 요약), pubDate(확인 가능한 보도 날짜 또는 빈 문자열), url(개별 기사 원문 URL)을 포함하세요.
+제목을 중복 생성하거나 서로 다른 기사 내용을 합치지 마세요. URL을 추측·생성하지 마세요. 기사 직접 링크가 없으면 반환하지 마세요. URL 하나를 여러 기사에 재사용하지 마세요.
+반드시 JSON 배열만 반환하세요.`;
 
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(state.apiKey)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: prompt }] }],
-                        tools: [{ google_search: {} }]
+                        tools: [{ google_search: {} }],
+                        generationConfig: { responseMimeType: 'application/json' }
                     })
                 });
 
                 const data = await response.json();
-                showLoading(false);
+                if (!response.ok) {
+                    throw new Error(data.error?.message || `Gemini API 오류 (${response.status})`);
+                }
 
-                // Extract Grounding Chunks (Real Deep-Link URLs)
-                const groundingChunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-                const validDeepLinks = groundingChunks
-                    .map(chunk => chunk?.web?.uri)
-                    .filter(uri => uri && !uri.includes('google.com/search') && !isCategoryUrl(uri));
+                const candidate = data.candidates?.[0];
+                const groundingArticles = getGroundingArticles(
+                    candidate?.groundingMetadata?.groundingChunks || []
+                );
+                let rawText = (candidate?.content?.parts || []).map(part => part.text || '').join('').trim();
+                rawText = rawText.replace(/^\`\`\`(?:json)?\\s*/i, '').replace(/\\s*\`\`\`$/, '');
 
-                let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-
-                let articles = [];
+                let parsedArticles;
                 try {
-                    articles = JSON.parse(rawText);
-                } catch (e) {
-                    const match = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-                    if (match) articles = JSON.parse(match[0]);
+                    parsedArticles = JSON.parse(rawText);
+                } catch (_) {
+                    const match = rawText.match(/\\[[\\s\\S]*\\]/);
+                    if (!match) throw new Error('뉴스 결과를 JSON으로 읽을 수 없습니다.');
+                    parsedArticles = JSON.parse(match[0]);
+                }
+                if (!Array.isArray(parsedArticles)) {
+                    parsedArticles = parsedArticles.articles || parsedArticles.items || [];
                 }
 
-                if (!articles || articles.length === 0) {
-                    articles = getFallbackArticles(country, count, dateStr);
+                const usedUrls = new Set();
+                const usedHeadlines = new Set();
+                const articles = [];
+
+                for (const item of parsedArticles) {
+                    const headline = String(item.headline || '').trim();
+                    const originalTitle = String(item.originalTitle || '').trim();
+                    const summary = String(item.summary || '').trim();
+                    const requestedUrl = String(item.url || '').trim();
+                    if (!headline || !summary || !requestedUrl) continue;
+
+                    let normalizedRequestedUrl;
+                    try {
+                        const parsedUrl = new URL(requestedUrl);
+                        if (!['http:', 'https:'].includes(parsedUrl.protocol)) continue;
+                        parsedUrl.hash = '';
+                        normalizedRequestedUrl = parsedUrl.href;
+                    } catch (_) { continue; }
+
+                    // Model URL must exactly match a direct URL returned by Google grounding.
+                    const grounded = groundingArticles.find(entry => entry.url === normalizedRequestedUrl);
+                    if (!grounded || usedUrls.has(grounded.url)) continue;
+
+                    const groundedTitle = normalizeHeadline(grounded.groundingTitle);
+                    const suppliedTitle = normalizeHeadline(originalTitle || headline);
+                    const titleTokens = suppliedTitle.split(' ').filter(token => token.length > 1);
+                    const overlap = titleTokens.filter(token => groundedTitle.includes(token)).length;
+                    const titleMatch = suppliedTitle === groundedTitle ||
+                        (titleTokens.length >= 3 && overlap / titleTokens.length >= 0.6);
+                    if (!titleMatch) continue;
+
+                    const headlineKey = normalizeHeadline(headline);
+                    if (!headlineKey || usedHeadlines.has(headlineKey)) continue;
+
+                    usedUrls.add(grounded.url);
+                    usedHeadlines.add(headlineKey);
+                    articles.push({
+                        source: String(item.source || grounded.source).trim(),
+                        headline,
+                        summary,
+                        pubDate: String(item.pubDate || '').trim(),
+                        url: grounded.url,
+                        imageUrl: sampleImages[articles.length % sampleImages.length]
+                    });
+                    if (articles.length >= count) break;
                 }
 
-                // 1:1 Precise Deep-Link Binding Strategy
-                articles = articles.map((art, i) => {
-                    let deepUrl = validDeepLinks[i] || validDeepLinks[i % validDeepLinks.length];
-
-                    if (!deepUrl || isCategoryUrl(deepUrl)) {
-                        if (country === '태국') {
-                            deepUrl = `https://www.bangkokpost.com/thailand/general/289${1000 + i}`;
-                        } else if (country === '베트남') {
-                            deepUrl = `https://vnexpress.net/topic/tin-tuc-289${1000 + i}.html`;
-                        } else {
-                            deepUrl = `https://www.google.com/search?q=${encodeURIComponent(art.headline)}`;
-                        }
-                    }
-
-                    art.url = deepUrl;
-                    art.imageUrl = sampleImages[i % sampleImages.length];
-                    return art;
-                });
+                if (!articles.length) {
+                    throw new Error('제목과 원문 링크가 일치하는 실제 기사를 확인하지 못했습니다.');
+                }
 
                 state.articles = articles;
                 renderNewsList();
-
+                if (articles.length < count) {
+                    alert(`요청한 ${count}개 중 제목과 원문 링크가 확인된 ${articles.length}개만 표시했습니다. 나머지는 임의로 채우지 않았습니다.`);
+                }
             } catch (err) {
-                console.error(err);
+                console.error('News collection failed:', err);
+                state.articles = [];
+                document.getElementById('news-article-list').innerHTML = '';
+                document.getElementById('opt1-step2-container').classList.add('hidden');
+                alert(`뉴스 수집 실패: ${err.message}\\n가짜 기사나 추정 링크는 표시하지 않았습니다.`);
+            } finally {
                 showLoading(false);
-                state.articles = getFallbackArticles(country, count, dateStr);
-                renderNewsList();
             }
         }
 
@@ -721,23 +790,6 @@ Google Search(google_search) 도구를 이용해 ${country}의 주요 현지 일
             alert('재생이 중단되었습니다.');
         }
 
-        function getFallbackArticles(country, count, dateStr) {
-            const list = [];
-            const sources = country === '태국' ? ['Bangkok Post', 'The Nation Thailand'] : (country === '베트남' ? ['VnExpress', 'Tuoi Tre News'] : ['조선일보', '매일경제']);
-            
-            for (let i = 0; i < count; i++) {
-                const src = sources[i % sources.length];
-                list.push({
-                    source: src,
-                    headline: `${country} 정부, 무비자 연장 및 투자 유치 전격 승인... 현지 산업계 대규모 인프라 개편 발표 (${i + 1})`,
-                    summary: `${country} 정부와 관련 부처가 외교 및 경제 활성화를 위한 신규 핵심 통합 정책을 최종 승인했습니다. 이번 조치는 주요 국가 체류 비자 및 관광 무비자 기간을 대폭 연장함과 동시에, 주요 거점 신도시와 공항을 연결하는 교통 인프라 혁신 사업을 골자로 하고 있습니다. 현지 상공회의소 및 유통 업계 관계자들은 이번 승인으로 인해 연간 25% 이상의 해외 투자가 유입되고 교민 상권 확장에 획기적인 전환점이 될 것으로 기대를 모으고 있습니다.`,
-                    url: country === '태국' ? `https://www.bangkokpost.com/thailand/general/289${1000 + i}` : `https://vnexpress.net/topic/tin-tuc-289${1000 + i}.html`,
-                    pubDate: dateStr,
-                    imageUrl: sampleImages[i % sampleImages.length]
-                });
-            }
-            return list;
-        }
     </script>
 </body>
 </html>
