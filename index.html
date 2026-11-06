@@ -429,6 +429,57 @@
             return scored[0].page;
         }
 
+        // Retry temporary overloads, then switch to a faster Search-grounded fallback model.
+        async function requestGeminiNews(prompt, apiKey, signal) {
+            const models = [
+                {id:'gemini-2.5-flash', attempts:2},
+                {id:'gemini-3.5-flash-lite', attempts:1}
+            ];
+            let lastError = null;
+            for (const model of models) {
+                for (let attempt = 1; attempt <= model.attempts; attempt++) {
+                    let response, data;
+                    try {
+                        response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model.id + ':generateContent?key=' + encodeURIComponent(apiKey), {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body:JSON.stringify({
+                                contents:[{parts:[{text:prompt}]}],
+                                tools:[{google_search:{}}],
+                                generationConfig:{temperature:0.2, maxOutputTokens:2048}
+                            }),
+                            signal:signal
+                        });
+                        try { data = await response.json(); }
+                        catch (_) { throw new Error('Gemini 서버 응답을 읽을 수 없습니다.'); }
+                        if (response.ok) return {data:data, model:model.id};
+                        const detail = data && data.error && data.error.message
+                            ? data.error.message : ('Gemini API 오류 (' + response.status + ')');
+                        lastError = new Error(detail);
+                        const temporary = [408,429,500,502,503,504].includes(response.status)
+                            || /high demand|overload|temporar|unavailable|capacity/i.test(detail);
+                        if (!temporary) throw lastError;
+                    } catch (err) {
+                        if (err && err.name === 'AbortError') throw err;
+                        lastError = err;
+                        const message = String(err && err.message || '');
+                        const temporary = /high demand|overload|temporar|unavailable|capacity|Failed to fetch|NetworkError/i.test(message);
+                        if (!temporary) throw err;
+                    }
+                    if (attempt < model.attempts) {
+                        await new Promise((resolve, reject) => {
+                            const delayId = setTimeout(resolve, 1200);
+                            if (signal) signal.addEventListener('abort', () => {
+                                clearTimeout(delayId);
+                                reject(new DOMException('요청 시간 초과', 'AbortError'));
+                            }, {once:true});
+                        });
+                    }
+                }
+            }
+            throw new Error('기본 Gemini 모델과 대체 모델 모두 현재 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요. (' + (lastError ? lastError.message : '일시적 서버 과부하') + ')');
+        }
+
         // Bind each article only to its exact Google-grounded URL; never map by list position.
         async function fetchNewsArticles() {
             if (newsFetchInProgress) return;
@@ -442,7 +493,7 @@
             const topics = state.selectedTopics.join(', ') || '종합 소식';
             const now = new Date();
             const dateStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
-            showLoading(true, country + ' 최신 기사 검색 중... (최대 60초)');
+            showLoading(true, country + ' 최신 기사 검색 중... (서버 혼잡 시 자동 재시도 및 대체 모델 전환, 최대 60초)');
             state.articles = [];
             document.getElementById('news-article-list').innerHTML = '';
             document.getElementById('opt1-step2-container').classList.add('hidden');
@@ -452,15 +503,8 @@
                 'url 필드는 출력하지 마세요. 기사 제목을 만들거나 서로 다른 기사를 합치지 말고, 확인된 기사만 JSON 배열로 반환하세요. 결과는 간결하게 작성하세요.';
             try {
                 newsRequestTimeoutId = setTimeout(() => newsRequestController.abort(), 60000);
-                const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(state.apiKey), {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({contents:[{parts:[{text:prompt}]}], tools:[{google_search:{}}], generationConfig:{temperature:0.2, maxOutputTokens:2048}}),
-                    signal: newsRequestController.signal
-                });
-                let data;
-                try { data = await response.json(); }
-                catch (_) { throw new Error('Gemini 서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.'); }
-                if (!response.ok) throw new Error((data.error && data.error.message) || ('Gemini API 오류 (' + response.status + ')'));
+                const result = await requestGeminiNews(prompt, state.apiKey, newsRequestController.signal);
+                const data = result.data;
                 const candidate = data.candidates && data.candidates[0];
                 const groundedPages = getGroundingArticles((candidate && candidate.groundingMetadata && candidate.groundingMetadata.groundingChunks) || []);
                 let rawText = ((candidate && candidate.content && candidate.content.parts) || []).map(part => part.text || '').join('').trim();
