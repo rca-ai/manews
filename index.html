@@ -546,12 +546,12 @@
         // Preferred response format is plain text blocks to avoid forcing JSON-only grounded output.
         function parseNewsResponse(raw) {
             const text = String(raw || '').trim();
-            const blocks = [...text.matchAll(/\\[NEWS\\]([\\s\\S]*?)\\[\\/NEWS\\]/gi)];
+            const blocks = [...text.matchAll(/\[NEWS\]([\s\S]*?)\[\/NEWS\]/gi)];
             if (blocks.length) {
                 const items = blocks.map(match => {
                     const fields = {};
-                    for (const line of match[1].split(/\\r?\\n/)) {
-                        const field = line.match(/^\\s*(ORIGINAL_TITLE|SOURCE_TITLE|HEADLINE|SUMMARY|PUB_DATE|원문제목|제목|요약|날짜|언론사)\\s*[:：]\\s*(.*)\\s*$/i);
+                    for (const line of match[1].split(/\r?\n/)) {
+                        const field = line.match(/^\s*(ORIGINAL_TITLE|SOURCE_TITLE|HEADLINE|SUMMARY|PUB_DATE|원문제목|제목|요약|날짜|언론사)\s*[:：]\s*(.*)\s*$/i);
                         if (field) fields[field[1].toUpperCase()] = field[2].trim();
                     }
                     return {
@@ -608,11 +608,11 @@
             state.articles = [];
             document.getElementById('news-article-list').innerHTML = '';
             document.getElementById('opt1-step2-container').classList.add('hidden');
-            const prompt = '현재 기준 시각: ' + dateStr + '\\n국가: ' + country + '\\n검색 기간: ' + timerange + '\\n관심 분야: ' + topics + '\\n\\n' +
-                'Google Search로 해당 국가의 최근 개별 뉴스 기사 ' + count + '개를 검색하세요. 검색 기간에 해당하는 기사만 선택하세요.\\n' +
-                'JSON, XML, 코드 블록, 표로 출력하지 마세요. 검색 근거가 유지되도록 일반 텍스트로 아래 형식을 반복하세요.\\n' +
-                '[NEWS]\\nORIGINAL_TITLE: Google 검색 결과의 원문 기사 제목을 가능한 한 정확히 그대로 복사\\nHEADLINE: 한국어 기사 제목\\nSUMMARY: 원문에서 확인되는 핵심 1~2문장\\nPUB_DATE: 확인 가능한 날짜 또는 빈 문자열\\n[/NEWS]\\n' +
-                '원문 제목은 번역하거나 요약하지 마세요. 실제 검색된 개별 기사만 포함하고, 기사나 날짜를 만들어내지 마세요. 원문 URL은 출력하지 마세요.'
+            const prompt = '현재 기준 시각: ' + dateStr + '\n국가: ' + country + '\n검색 기간: ' + timerange + '\n관심 분야: ' + topics + '\n\n' +
+                'Google Search로 해당 국가의 최근 개별 뉴스 기사 ' + count + '개를 검색하세요. 검색 기간에 해당하는 기사만 선택하세요.\n' +
+                'JSON, XML, 코드 블록, 표로 출력하지 마세요. 검색 근거가 유지되도록 일반 텍스트로 아래 형식을 반복하세요.\n' +
+                '[NEWS]\nORIGINAL_TITLE: Google 검색 결과의 원문 기사 제목을 가능한 한 정확히 그대로 복사\nHEADLINE: 한국어 기사 제목\nSUMMARY: 원문에서 확인되는 핵심 1~2문장\nPUB_DATE: 확인 가능한 날짜 또는 빈 문자열\n[/NEWS]\n' +
+                '원문 제목은 번역하거나 요약하지 마세요. 실제 검색된 개별 기사만 포함하고, 기사나 날짜를 만들어내지 마세요. 원문 URL은 출력하지 마세요.';
             try {
                 newsRequestTimeoutId = setTimeout(() => newsRequestController.abort(), 60000);
                 const result = await requestGeminiNews(prompt, state.apiKey, newsRequestController.signal);
