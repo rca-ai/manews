@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>크리에이터스튜디오 AI v1.10 - 유튜브 자동화 & 스튜디오</title>
+    <title>크리에이터스튜디오 AI v1.11 - 유튜브 자동화 & 스튜디오</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -30,7 +30,7 @@
                 <div>
                     <div class="flex items-center space-x-2">
                         <h1 class="font-bold text-lg leading-tight">크리에이터스튜디오 AI</h1>
-                        <span class="bg-indigo-900/80 text-indigo-300 text-xs px-2 py-0.5 rounded-md font-mono border border-indigo-700/50">v1.10</span>
+                        <span class="bg-indigo-900/80 text-indigo-300 text-xs px-2 py-0.5 rounded-md font-mono border border-indigo-700/50">v1.11</span>
                     </div>
                     <p class="text-xs text-slate-400">유튜브 카드뉴스 & 다중 화자 음성 오디오 스튜디오</p>
                 </div>
@@ -413,11 +413,18 @@
             return Math.max(tokenScore(), charScore);
         }
 
+        function getGroundingMetadata(data, candidate) {
+            return (candidate && (candidate.groundingMetadata || candidate.grounding_metadata))
+                || (data && (data.groundingMetadata || data.grounding_metadata))
+                || {};
+        }
+
         function getGroundingArticles(chunks) {
             const seen = new Set(), result = [];
             for (const chunk of chunks || []) {
-                const uri = chunk && chunk.web && chunk.web.uri;
-                const title = chunk && chunk.web && chunk.web.title;
+                const web = chunk && (chunk.web || chunk.webPage || chunk.web_page);
+                const uri = web && (web.uri || web.url);
+                const title = web && (web.title || web.name);
                 if (!uri || isCategoryUrl(uri)) continue;
                 try {
                     const parsed = new URL(uri); parsed.hash = '';
@@ -425,11 +432,30 @@
                     if (seen.has(parsed.href)) continue;
                     seen.add(parsed.href);
                     const source = parsed.hostname.replace(/^www\./, '');
-                    const fallbackTitle = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || source).replace(/[-_]+/g, ' ');
+                    let fallbackTitle = source;
+                    try {
+                        fallbackTitle = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || source).replace(/[-_]+/g, ' ');
+                    } catch (_) {}
                     result.push({url: parsed.href, groundingTitle: String(title || fallbackTitle || source).trim(), source: source});
                 } catch (_) {}
             }
             return result;
+        }
+
+        function getGroundingDiagnostics(data, candidate, metadata, groundedPages) {
+            const queries = metadata.webSearchQueries || metadata.web_search_queries || [];
+            const chunks = metadata.groundingChunks || metadata.grounding_chunks || [];
+            const finishReason = candidate && (candidate.finishReason || candidate.finish_reason) || 'unknown';
+            const blockReason = data && data.promptFeedback && data.promptFeedback.blockReason
+                || data && data.prompt_feedback && data.prompt_feedback.block_reason || '';
+            return {
+                model: data && data.modelVersion || 'unknown',
+                finishReason: finishReason,
+                blockReason: blockReason || 'none',
+                searchQueryCount: Array.isArray(queries) ? queries.length : 0,
+                groundingChunkCount: Array.isArray(chunks) ? chunks.length : 0,
+                usableUrlCount: groundedPages.length
+            };
         }
 
         // Match an article to a unique Google-grounded result by its original headline.
@@ -454,7 +480,7 @@
         // Retry temporary overloads, then switch to a faster Search-grounded fallback model.
         async function requestGeminiNews(prompt, apiKey, signal) {
             const models = [
-                {id:'gemini-2.5-flash', attempts:2},
+                {id:'gemini-3.8-flash', attempts:2},
                 {id:'gemini-3.5-flash-lite', attempts:1}
             ];
             let lastError = null;
@@ -609,17 +635,39 @@
             document.getElementById('news-article-list').innerHTML = '';
             document.getElementById('opt1-step2-container').classList.add('hidden');
             const prompt = '현재 기준 시각: ' + dateStr + '\n국가: ' + country + '\n검색 기간: ' + timerange + '\n관심 분야: ' + topics + '\n\n' +
-                'Google Search로 해당 국가의 최근 개별 뉴스 기사 ' + count + '개를 검색하세요. 검색 기간에 해당하는 기사만 선택하세요.\n' +
-                'JSON, XML, 코드 블록, 표로 출력하지 마세요. 검색 근거가 유지되도록 일반 텍스트로 아래 형식을 반복하세요.\n' +
-                '[NEWS]\nORIGINAL_TITLE: Google 검색 결과의 원문 기사 제목을 가능한 한 정확히 그대로 복사\nHEADLINE: 한국어 기사 제목\nSUMMARY: 원문에서 확인되는 핵심 1~2문장\nPUB_DATE: 확인 가능한 날짜 또는 빈 문자열\n[/NEWS]\n' +
-                '원문 제목은 번역하거나 요약하지 마세요. 실제 검색된 개별 기사만 포함하고, 기사나 날짜를 만들어내지 마세요. 원문 URL은 출력하지 마세요.';
+                '반드시 Google Search 도구를 사용해 실제 웹 검색을 수행하세요. 모델의 기존 지식만으로 답하지 마세요.\n' +
+                '검색 대상: ' + country + '의 ' + timerange + ' 기간 내 관심 분야(' + topics + ') 최신 개별 뉴스 기사.\n' +
+                'Google 검색어를 최소 3개로 나누어 검색하고, 언론사 기사 원문 페이지를 우선 확인하세요. 검색 결과가 부족하면 인접한 관련 주제로 검색 범위를 넓히세요.\n' +
+                '검색으로 확인한 기사만 아래 일반 텍스트 형식으로 반환하세요. JSON, XML, 코드 블록, 표는 사용하지 마세요.\n' +
+                '[NEWS]\nORIGINAL_TITLE: 검색 결과 원문 제목 그대로\nHEADLINE: 한국어 제목\nSUMMARY: 원문에서 확인되는 핵심 1~2문장\nPUB_DATE: 확인 가능한 날짜 또는 빈 문자열\n[/NEWS]\n' +
+                '원문 제목은 번역하거나 요약하지 마세요. 실제 검색하지 않은 기사, 날짜, URL을 만들지 마세요.';
             try {
                 newsRequestTimeoutId = setTimeout(() => newsRequestController.abort(), 60000);
-                const result = await requestGeminiNews(prompt, state.apiKey, newsRequestController.signal);
-                const data = result.data;
-                const candidate = data.candidates && data.candidates[0];
-                const groundedPages = getGroundingArticles((candidate && candidate.groundingMetadata && candidate.groundingMetadata.groundingChunks) || []);
+                let result = await requestGeminiNews(prompt, state.apiKey, newsRequestController.signal);
+                let data = result.data;
+                let candidate = data.candidates && data.candidates[0];
+                let metadata = getGroundingMetadata(data, candidate);
+                let groundedPages = getGroundingArticles(metadata.groundingChunks || metadata.grounding_chunks || []);
                 let rawText = ((candidate && candidate.content && candidate.content.parts) || []).map(part => part.text || '').join('').trim();
+
+                // A successful text response is not proof that Search actually ran.
+                // If no usable sources were returned, perform one explicit search-focused retry.
+                if (!groundedPages.length && !newsRequestController.signal.aborted) {
+                    const retryPrompt = '검색 출처가 반드시 필요한 뉴스 수집 요청입니다. 반드시 Google Search 도구를 실행하세요. ' +
+                        country + '의 ' + timerange + ' 기간에 해당하는 ' + topics + ' 관련 실제 뉴스 기사 ' + count + '개를 검색하세요. ' +
+                        '서로 다른 검색어를 사용해 최소 3회 검색하고, 검색 결과에 나온 개별 기사 원문 제목과 내용을 확인하세요. ' +
+                        '기억에 의존하거나 기사를 만들어내지 마세요. JSON이 아닌 일반 텍스트로 [NEWS], ORIGINAL_TITLE:, HEADLINE:, SUMMARY:, PUB_DATE:, [/NEWS] 형식을 반복하세요. ' +
+                        'ORIGINAL_TITLE은 검색 결과의 원문 제목을 그대로 복사하고 HEADLINE은 한국어로 작성하세요.';
+                    showLoading(true, country + ' Google 검색 출처 재확인 중...');
+                    result = await requestGeminiNews(retryPrompt, state.apiKey, newsRequestController.signal);
+                    data = result.data;
+                    candidate = data.candidates && data.candidates[0];
+                    metadata = getGroundingMetadata(data, candidate);
+                    groundedPages = getGroundingArticles(metadata.groundingChunks || metadata.grounding_chunks || []);
+                    rawText = ((candidate && candidate.content && candidate.content.parts) || []).map(part => part.text || '').join('').trim();
+                }
+                const searchDiagnostics = getGroundingDiagnostics(data, candidate, metadata, groundedPages);
+                console.info('News search diagnostics:', searchDiagnostics);
                 rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
                 let items;
                 try {
@@ -650,7 +698,7 @@
                     const groundedCount = groundedPages.length;
                     throw new Error(groundedCount
                         ? 'Google 검색 결과 ' + groundedCount + '건은 받았지만 기사 제목과 연결할 수 있는 결과가 없습니다. 검색 기간이나 관심 분야를 바꿔 다시 시도해 주세요.'
-                        : 'Google 검색 근거가 반환되지 않았습니다. API 키, 검색 권한 및 네트워크를 확인해 주세요.');
+                        : '두 차례 검색 요청 후에도 Google 검색 출처가 반환되지 않았습니다. 검색 진단: 모델=' + searchDiagnostics.model + ', 종료=' + searchDiagnostics.finishReason + ', 검색쿼리=' + searchDiagnostics.searchQueryCount + ', 검색근거=' + searchDiagnostics.groundingChunkCount + ', 차단=' + searchDiagnostics.blockReason + '. Gemini API 키의 프로젝트·권한·할당량과 Google Search Grounding 사용 가능 여부를 확인해 주세요.');
                 }
                 state.articles = articles; renderNewsList();
                 if (articles.length < count) alert('요청한 ' + count + '개 중 제목과 원문 링크가 확인된 ' + articles.length + '개만 표시했습니다. 확인되지 않은 기사는 임의로 채우지 않았습니다.');
