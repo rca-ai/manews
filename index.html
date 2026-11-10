@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>크리에이터스튜디오 AI v1.09 - 유튜브 자동화 & 스튜디오</title>
+    <title>크리에이터스튜디오 AI v1.10 - 유튜브 자동화 & 스튜디오</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -30,7 +30,7 @@
                 <div>
                     <div class="flex items-center space-x-2">
                         <h1 class="font-bold text-lg leading-tight">크리에이터스튜디오 AI</h1>
-                        <span class="bg-indigo-900/80 text-indigo-300 text-xs px-2 py-0.5 rounded-md font-mono border border-indigo-700/50">v1.09</span>
+                        <span class="bg-indigo-900/80 text-indigo-300 text-xs px-2 py-0.5 rounded-md font-mono border border-indigo-700/50">v1.10</span>
                     </div>
                     <p class="text-xs text-slate-400">유튜브 카드뉴스 & 다중 화자 음성 오디오 스튜디오</p>
                 </div>
@@ -387,12 +387,30 @@
         }
 
         function titleSimilarity(a, b) {
-            const tokens = value => new Set(normalizeHeadline(value).split(' ').filter(t => t.length > 1));
-            const left = tokens(a), right = tokens(b);
-            if (!left.size || !right.size) return 0;
-            let intersection = 0;
-            left.forEach(token => { if (right.has(token)) intersection++; });
-            return intersection / Math.max(left.size, right.size);
+            const leftText = normalizeHeadline(a), rightText = normalizeHeadline(b);
+            if (!leftText || !rightText) return 0;
+            if (leftText === rightText) return 1;
+            const tokenScore = () => {
+                const left = new Set(leftText.split(' ').filter(t => t.length > 1));
+                const right = new Set(rightText.split(' ').filter(t => t.length > 1));
+                if (!left.size || !right.size) return 0;
+                let intersection = 0;
+                left.forEach(token => { if (right.has(token)) intersection++; });
+                return intersection / Math.max(left.size, right.size);
+            };
+            // Character bigrams also work for Thai, Chinese and Japanese titles without spaces.
+            const grams = value => {
+                const chars = Array.from(value.replace(/\s+/g, ''));
+                if (chars.length <= 2) return new Set(chars);
+                const set = new Set();
+                for (let i = 0; i < chars.length - 1; i++) set.add(chars[i] + chars[i + 1]);
+                return set;
+            };
+            const leftGrams = grams(leftText), rightGrams = grams(rightText);
+            let common = 0;
+            leftGrams.forEach(gram => { if (rightGrams.has(gram)) common++; });
+            const charScore = (2 * common) / Math.max(1, leftGrams.size + rightGrams.size);
+            return Math.max(tokenScore(), charScore);
         }
 
         function getGroundingArticles(chunks) {
@@ -400,12 +418,15 @@
             for (const chunk of chunks || []) {
                 const uri = chunk && chunk.web && chunk.web.uri;
                 const title = chunk && chunk.web && chunk.web.title;
-                if (!uri || !title || isCategoryUrl(uri)) continue;
+                if (!uri || isCategoryUrl(uri)) continue;
                 try {
                     const parsed = new URL(uri); parsed.hash = '';
+                    if (!['http:', 'https:'].includes(parsed.protocol)) continue;
                     if (seen.has(parsed.href)) continue;
                     seen.add(parsed.href);
-                    result.push({url: parsed.href, groundingTitle: String(title).trim(), source: parsed.hostname.replace(/^www\./, '')});
+                    const source = parsed.hostname.replace(/^www\./, '');
+                    const fallbackTitle = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || source).replace(/[-_]+/g, ' ');
+                    result.push({url: parsed.href, groundingTitle: String(title || fallbackTitle || source).trim(), source: source});
                 } catch (_) {}
             }
             return result;
@@ -414,8 +435,9 @@
         // Match an article to a unique Google-grounded result by its original headline.
         // The URL always comes from Google grounding, never from model-generated text.
         function matchGroundedArticle(item, groundedPages, usedUrls) {
-            const originalTitle = String(item.originalTitle || '').trim();
+            const originalTitle = String(item.originalTitle || item.sourceTitle || item.title || '').trim();
             const headline = String(item.headline || '').trim();
+            // Prefer the source-language title; translated Korean headlines are unreliable matching keys.
             const searchTitle = originalTitle || headline;
             if (!searchTitle) return null;
             const scored = groundedPages
@@ -423,9 +445,9 @@
                 .map(page => ({page, score:titleSimilarity(searchTitle, page.groundingTitle)}))
                 .sort((a,b) => b.score-a.score);
             if (!scored.length) return null;
-            const minimum = originalTitle ? 0.35 : 0.55;
+            const minimum = originalTitle ? 0.24 : 0.72;
             if (scored[0].score < minimum) return null;
-            if (scored.length > 1 && scored[0].score - scored[1].score < 0.08) return null;
+            if (scored.length > 1 && scored[0].score - scored[1].score < 0.06) return null;
             return scored[0].page;
         }
 
@@ -521,6 +543,30 @@
             throw new Error('응답에 읽을 수 있는 뉴스 JSON 데이터가 없습니다.');
         }
 
+        // Preferred response format is plain text blocks to avoid forcing JSON-only grounded output.
+        function parseNewsResponse(raw) {
+            const text = String(raw || '').trim();
+            const blocks = [...text.matchAll(/\\[NEWS\\]([\\s\\S]*?)\\[\\/NEWS\\]/gi)];
+            if (blocks.length) {
+                const items = blocks.map(match => {
+                    const fields = {};
+                    for (const line of match[1].split(/\\r?\\n/)) {
+                        const field = line.match(/^\\s*(ORIGINAL_TITLE|SOURCE_TITLE|HEADLINE|SUMMARY|PUB_DATE|원문제목|제목|요약|날짜|언론사)\\s*[:：]\\s*(.*)\\s*$/i);
+                        if (field) fields[field[1].toUpperCase()] = field[2].trim();
+                    }
+                    return {
+                        originalTitle: fields.ORIGINAL_TITLE || fields.SOURCE_TITLE || fields['원문제목'] || '',
+                        headline: fields.HEADLINE || fields['제목'] || '',
+                        summary: fields.SUMMARY || fields['요약'] || '',
+                        pubDate: fields.PUB_DATE || fields['날짜'] || '',
+                        source: fields.SOURCE || fields['언론사'] || ''
+                    };
+                }).filter(item => item.headline && item.summary);
+                if (items.length) return items;
+            }
+            return parseNewsItems(text);
+        }
+
         // If Search-grounded text is useful but not valid JSON, ask a model to reformat it.
         // This call does not perform another search; article URLs still come only from the first call's grounding metadata.
         async function repairNewsJson(rawText, apiKey, signal) {
@@ -562,10 +608,11 @@
             state.articles = [];
             document.getElementById('news-article-list').innerHTML = '';
             document.getElementById('opt1-step2-container').classList.add('hidden');
-            const prompt = '현재 기준 시각: ' + dateStr + '\n국가: ' + country + '\n검색 기간: ' + timerange + '\n관심 분야: ' + topics + '\n\n' +
-                'Google Search로 해당 국가의 최근 개별 뉴스 기사 ' + count + '개를 검색하세요. 검색 기간에 해당하는 기사만 선택하세요.\n' +
-                '각 항목은 source(언론사), headline(한국어 제목), originalTitle(Google 검색 근거에 나온 원문 제목을 정확히 복사), summary(핵심 1~2문장), pubDate(확인 가능한 날짜 또는 빈 문자열)로 구성하세요.\n' +
-                'url 필드는 출력하지 마세요. 기사 제목을 만들거나 서로 다른 기사를 합치지 말고, 확인된 기사만 JSON 배열로 반환하세요. 결과는 간결하게 작성하세요.';
+            const prompt = '현재 기준 시각: ' + dateStr + '\\n국가: ' + country + '\\n검색 기간: ' + timerange + '\\n관심 분야: ' + topics + '\\n\\n' +
+                'Google Search로 해당 국가의 최근 개별 뉴스 기사 ' + count + '개를 검색하세요. 검색 기간에 해당하는 기사만 선택하세요.\\n' +
+                'JSON, XML, 코드 블록, 표로 출력하지 마세요. 검색 근거가 유지되도록 일반 텍스트로 아래 형식을 반복하세요.\\n' +
+                '[NEWS]\\nORIGINAL_TITLE: Google 검색 결과의 원문 기사 제목을 가능한 한 정확히 그대로 복사\\nHEADLINE: 한국어 기사 제목\\nSUMMARY: 원문에서 확인되는 핵심 1~2문장\\nPUB_DATE: 확인 가능한 날짜 또는 빈 문자열\\n[/NEWS]\\n' +
+                '원문 제목은 번역하거나 요약하지 마세요. 실제 검색된 개별 기사만 포함하고, 기사나 날짜를 만들어내지 마세요. 원문 URL은 출력하지 마세요.'
             try {
                 newsRequestTimeoutId = setTimeout(() => newsRequestController.abort(), 60000);
                 const result = await requestGeminiNews(prompt, state.apiKey, newsRequestController.signal);
@@ -576,12 +623,12 @@
                 rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
                 let items;
                 try {
-                    items = parseNewsItems(rawText);
+                    items = parseNewsResponse(rawText);
                 } catch (parseError) {
                     const originalParseError = parseError;
                     try {
                         const repairedText = await repairNewsJson(rawText, state.apiKey, newsRequestController.signal);
-                        items = parseNewsItems(repairedText);
+                        items = parseNewsResponse(repairedText);
                     } catch (repairError) {
                         throw new Error('뉴스 결과 형식 해석에 실패했습니다. 원본 응답과 자동 보정 응답 모두 뉴스 목록으로 변환하지 못했습니다. (' + (repairError.message || originalParseError.message) + ')');
                     }
